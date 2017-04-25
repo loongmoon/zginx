@@ -7,52 +7,69 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <pthread.h>
 #define PORT 9001
-#define QUEUE_MAX_COUNT 5 //最大并发数
+#define QUEUE_MAX_COUNT 5000 //最大并发数
 #define BUFF_SIZE 1024
 #define SERVER_STRING "Server: zginx/0.1.0\r\n"
 int startup();
 void accept_request(int);
+void error_die(const char *);
 int startup()
 {
-    int server_fd = -1;
-    int client_fd = -1;
-    struct sockaddr_in server_addr;
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    bind(server_fd, (struct sockaddr *)&server_addr,sizeof(server_addr));
-    listen(server_fd, QUEUE_MAX_COUNT);
+	int server_fd = -1;
+	int client_fd = -1;
+	struct sockaddr_in server_addr;
+	server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(PORT);
+	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	bind(server_fd, (struct sockaddr *)&server_addr,sizeof(server_addr));
+	listen(server_fd, QUEUE_MAX_COUNT);
 	return server_fd;
 }
 void accept_request(int client_fd)
 {
-    char buf[BUFF_SIZE];
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");
-    send(client_fd, buf, strlen(buf), 0);
-    strcpy(buf, SERVER_STRING);
-    send(client_fd, buf, strlen(buf), 0);
-    sprintf(buf, "Content-Type: text/html\r\n");
-    send(client_fd, buf, strlen(buf), 0);
-    strcpy(buf, "\r\n");
-    send(client_fd, buf, strlen(buf), 0);
-    sprintf(buf, "zginx\r\n");
-    send(client_fd, buf, strlen(buf), 0);
-    //close(client_fd);
+	char buf[BUFF_SIZE];
+	sprintf(buf, "HTTP/1.0 200 OK\r\n");
+	send(client_fd, buf, strlen(buf), 0);
+	strcpy(buf, SERVER_STRING);
+	send(client_fd, buf, strlen(buf), 0);
+	sprintf(buf, "Content-Type: text/html\r\n");
+	send(client_fd, buf, strlen(buf), 0);
+	strcpy(buf, "\r\n");
+	send(client_fd, buf, strlen(buf), 0);
+	sprintf(buf, "zginx\r\n");
+	send(client_fd, buf, strlen(buf), 0);
+	close(client_fd);
+}
+void error_die(const char *sc)
+{
+	/*出错信息处理 */
+	perror(sc);
+	exit(1);
 }
 int main()
 {
-    int server_fd = -1;
-    int client_fd = -1;
+	int server_fd = -1;
+	int client_fd = -1;
+	pthread_t newthread;
+
 	server_fd = startup();
 	printf("httpd running on port %d\n", PORT);
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-    client_fd = accept(server_fd, (struct sockaddr *)&client_addr,&client_addr_len);
-	accept_request(client_fd);
-    close(server_fd);
+	struct sockaddr_in client_addr;
+	socklen_t client_addr_len = sizeof(client_addr);
+	while (1) {
+		client_fd = accept(server_fd, (struct sockaddr *)&client_addr,&client_addr_len);
+		if (client_fd == -1) {
+			error_die("accept");
+		}
+		//accept_request(client_fd);
+		if (pthread_create(&newthread , NULL, accept_request, client_fd) != 0)
+			perror("pthread_create");
+	}
+	close(server_fd);
 
-    return 0;
+	return 0;
 }
