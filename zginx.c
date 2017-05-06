@@ -27,13 +27,13 @@ char* cwd;
 #define sendmsg(fd, buf) send(fd, buf, strlen(buf), 0)
 void *request_handle(void *param);
 static int parse_uri(char *uri, char *filename, char *cgiargs);
-int get_line(int, char *, int);
+int read_line(int, char *, int);
 void unimplemented(int); 
-void serve_file(int, const char *);
+void static_file(int, const char *);
 void not_found(int);
 void headers(int, const char *); 
-void cat(int, FILE *);
-void execute_cgi(int, const char *, const char *, const char *);
+void copy_file(int, FILE *);
+void exec_cgi(int, const char *, const char *, const char *);
 void bad_request(int);
 void cannot_execute(int);
 
@@ -46,6 +46,7 @@ typedef struct request_s {
 
 int main()
 {
+	printf("zginx正在%d端口进行监听", PORT);
 	int server_fd = -1;
 	int client_fd = -1;
 	struct sockaddr_in client_addr;
@@ -119,7 +120,7 @@ void *request_handle(void *param)
 	//			num);
 
 	/*得到请求的第一行*/  
-	numchars = get_line(req->client_fd, buf, sizeof(buf));  
+	numchars = read_line(req->client_fd, buf, sizeof(buf));  
 	i = 0; j = 0;  
 	/*把客户端的请求方法存到 method 数组*/  
 	while (!isspace(buf[j]) && (i < sizeof(method) - 1))  
@@ -177,7 +178,7 @@ void *request_handle(void *param)
 	if (stat(path, &st) == -1) {  
 		/*把所有 headers 的信息都丢弃*/  
 		while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */  
-			numchars = get_line(req->client_fd, buf, sizeof(buf));  
+			numchars = read_line(req->client_fd, buf, sizeof(buf));  
 		/*回应客户端找不到*/  
 		not_found(req->client_fd);  
 	}  
@@ -190,9 +191,9 @@ void *request_handle(void *param)
 			cgi = 1;  
 		/*不是 cgi,直接把服务器文件返回，否则执行 cgi */  
 		if (!cgi)  
-			serve_file(req->client_fd, path);  
+			static_file(req->client_fd, path);  
 		else  
-			execute_cgi(req->client_fd, path, method, query_string);  
+			exec_cgi(req->client_fd, path, method, query_string);  
 	} 
 
 	memset(buf, 0, 1024);
@@ -205,7 +206,7 @@ void *request_handle(void *param)
 
 	return NULL;
 }
-int get_line(int sock, char *buf, int size)  
+int read_line(int sock, char *buf, int size)  
 {  
 	int i = 0;  
 	char c = '\0';  
@@ -297,7 +298,7 @@ void unimplemented(int client)
 	sprintf(buf, "</BODY></HTML>\r\n");  
 	send(client, buf, strlen(buf), 0);  
 }  
-void serve_file(int client, const char *filename)  
+void static_file(int client, const char *filename)  
 {  
 	FILE *resource = NULL;  
 	int numchars = 1;  
@@ -306,7 +307,7 @@ void serve_file(int client, const char *filename)
 	/*读取并丢弃 header */  
 	buf[0] = 'A'; buf[1] = '\0';  
 	while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */  
-		numchars = get_line(client, buf, sizeof(buf));  
+		numchars = read_line(client, buf, sizeof(buf));  
 
 	/*打开 sever 的文件*/  
 	resource = fopen(filename, "r");  
@@ -317,7 +318,7 @@ void serve_file(int client, const char *filename)
 		/*写 HTTP header */  
 		headers(client, filename);  
 		/*复制文件*/  
-		cat(client, resource);  
+		copy_file(client, resource);  
 	}  
 	fclose(resource);  
 } 
@@ -362,7 +363,7 @@ void headers(int client, const char *filename)
 	strcpy(buf, "\r\n");  
 	send(client, buf, strlen(buf), 0);  
 }  
-void cat(int client, FILE *resource)  
+void copy_file(int client, FILE *resource)  
 {  
 	char buf[1024];  
 
@@ -374,7 +375,7 @@ void cat(int client, FILE *resource)
 		fgets(buf, sizeof(buf), resource);  
 	}  
 }  
-void execute_cgi(int client, const char *path, const char *method, const char *query_string)  
+void exec_cgi(int client, const char *path, const char *method, const char *query_string)  
 {  
 	char buf[1024];  
 	int cgi_output[2];  
@@ -390,11 +391,11 @@ void execute_cgi(int client, const char *path, const char *method, const char *q
 	if (strcasecmp(method, "GET") == 0)  
 		/*把所有的 HTTP header 读取并丢弃*/  
 		while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */  
-			numchars = get_line(client, buf, sizeof(buf));  
+			numchars = read_line(client, buf, sizeof(buf));  
 	else    /* POST */  
 	{  
 		/* 对 POST 的 HTTP 请求中找出 content_length */  
-		numchars = get_line(client, buf, sizeof(buf));  
+		numchars = read_line(client, buf, sizeof(buf));  
 		while ((numchars > 0) && strcmp("\n", buf))  
 		{  
 			/*利用 \0 进行分隔 */  
@@ -402,7 +403,7 @@ void execute_cgi(int client, const char *path, const char *method, const char *q
 			/* HTTP 请求的特点*/  
 			if (strcasecmp(buf, "Content-Length:") == 0)  
 				content_length = atoi(&(buf[16]));  
-			numchars = get_line(client, buf, sizeof(buf));  
+			numchars = read_line(client, buf, sizeof(buf));  
 		}  
 		/*没有找到 content_length */  
 		if (content_length == -1) {  
